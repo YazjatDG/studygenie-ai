@@ -93,7 +93,10 @@ class AIService:
             except Exception as oe:
                 last_error = oe
 
-        # Fall back to Gemini if available
+            if last_error is not None:
+                return f"System note: OpenAI API error. ({str(last_error)})"
+
+        # Fall back to Gemini if OpenAI is not configured or unavailable.
         client = _get_genai_client()
         if client is None:
             if last_error is not None:
