@@ -1,79 +1,191 @@
 import os
-import google.generativeai as genai
 from dotenv import load_dotenv
+try:
+    from google.genai import Client, errors
+except Exception:
+    Client = None
+    class _DummyErrors:
+        ClientError = Exception
+        ServerError = Exception
+        APIError = Exception
+    errors = _DummyErrors()
 
-# Load environment variables. Support both a standard ".env" and the
-# project's "api.env" file that ships alongside this module.
+try:
+    import openai
+    _OPENAI_AVAILABLE = True
+except Exception:
+    openai = None
+    _OPENAI_AVAILABLE = False
+
+load_dotenv("api.env")
 load_dotenv()
-load_dotenv(os.path.join(os.path.dirname(__file__), "api.env"))
 
-api_key = os.getenv("GEMINI_API_KEY", "").strip()
+# Support a legacy `api.env` file that contains only the bare API key (no VAR=VALUE line).
+# If `api.env` contains a single token (no '='), treat it as the GEMINI_API_KEY.
+try:
+    api_env_path = os.path.join(os.path.dirname(__file__), "api.env")
+    if "GEMINI_API_KEY" not in os.environ and os.path.exists(api_env_path):
+        with open(api_env_path, "r") as f:
+            raw_content = f.read().strip()
+        if raw_content and "=" not in raw_content:
+            os.environ["GEMINI_API_KEY"] = raw_content
+except Exception:
+    # If reading/parsing fails, fall back to load_dotenv behavior.
+    pass
 
-# Treat the shipped placeholder value as "no key configured".
-if api_key == "your_actual_gemini_api_key_here":
-    api_key = ""
+MODEL_CANDIDATES = [
+    "models/gemini-flash-latest",
+    "models/gemini-2.5-pro",
+    "models/gemini-2.5-flash",
+    "models/gemini-2.5-flash-lite",
+]
 
-if api_key:
-    genai.configure(api_key=api_key)
+
+def _get_genai_client():
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key or Client is None:
+        return None
+    return Client(api_key=api_key)
+
 
 class AIService:
     @staticmethod
-    def _call_gemini(prompt: str) -> str:
-        if not api_key:
-            return "⚠️ Gemini API key is missing. Please set GEMINI_API_KEY in your .env file."
-        try:
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            response = model.generate_content(prompt)
-            return response.text if response.text else "No response generated."
-        except Exception as e:
-            return f"Error connecting to AI engine: {str(e)}"
+    def _is_api_ready():
+        return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("OPENAI_API_KEY"))
 
-    @classmethod
-    def generate_timetable(cls, subjects: list, hours_per_day: int) -> str:
-        prompt = f"Create a structured weekly study timetable for these subjects: {', '.join(subjects)}. Target: {hours_per_day} hours/day. Respond in a clean, clean Markdown table format with days as rows and columns as time frames."
-        return cls._call_gemini(prompt)
+    @staticmethod
+    def _generate_response(prompt: str, model_name: str | None = None) -> str:
+        if not AIService._is_api_ready():
+            return (
+                "⚠️ API key missing. Set GEMINI_API_KEY or OPENAI_API_KEY in `.env` to enable AI features."
+            )
 
-    @classmethod
-    def rearrange_timetable(cls, missed_subject: str, reason: str) -> str:
-        prompt = f"The student missed their study session for '{missed_subject}' because of: '{reason}'. Give a dynamic, high-priority list of actionable shifts to recover this session over the next 48 hours without burning out."
-        return cls._call_gemini(prompt)
+        last_error = None
 
-    @classmethod
-    def suggest_weak_subjects(cls, history_summary: str) -> str:
-        prompt = f"Analyze this historical logging metric string of a student:\n{history_summary}\nIdentify weakness profiles, subject attention deficit points, and provide three customized architectural recommendations."
-        return cls._call_gemini(prompt)
+        # Prefer OpenAI if an OpenAI key is present and the SDK is available.
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        if openai_key and _OPENAI_AVAILABLE:
+            try:
+                openai.api_key = openai_key
+                model = os.environ.get("OPENAI_MODEL", "gpt-3.5-turbo")
+                resp = openai.ChatCompletion.create(model=model, messages=[{"role": "user", "content": str(prompt)}], max_tokens=512)
+                return resp.choices[0].message.content.strip() if resp and getattr(resp, "choices", None) else str(resp)
+            except Exception as oe:
+                last_error = oe
 
-    @classmethod
-    def chat_assistant(cls, user_message: str, dynamic_context: str = "") -> str:
-        prompt = f"Context metrics:\n{dynamic_context}\nUser question: {user_message}\nAct as StudyGenie, an expert structural academic guide. Respond clearly with formatting."
-        return cls._call_gemini(prompt)
+        # Fall back to Gemini if available
+        client = _get_genai_client()
+        if client is None:
+            if last_error is not None:
+                return f"System note: API error. ({str(last_error)})"
+            return "System note: No API client available. Please install provider SDK or set a valid key."
 
-    @classmethod
-    def summarize_notes(cls, content: str) -> str:
-        prompt = f"Provide a complete hierarchical architectural summary with clear headings and bold terms for the following context:\n{content}"
-        return cls._call_gemini(prompt)
+        if model_name:
+            candidates = [model_name]
+        else:
+            candidates = MODEL_CANDIDATES
 
-    @classmethod
-    def generate_flashcards(cls, content: str) -> str:
-        prompt = f"Extract exactly 5 key flashcard items from the following content. Format cleanly as Front/Back pairings:\n{content}"
-        return cls._call_gemini(prompt)
+        for candidate in candidates:
+            try:
+                response = client.models.generate_content(model=candidate, contents=str(prompt))
+                return getattr(response, "text", str(response))
+            except (errors.ClientError, errors.ServerError, errors.APIError) as api_err:
+                last_error = api_err
+                if candidate == candidates[-1]:
+                    break
+                continue
+            except Exception as e:
+                return f"System note: Please try refreshing the window. ({str(e)})"
 
-    @classmethod
-    def create_mcqs(cls, content: str) -> str:
-        prompt = f"Generate exactly 3 Multiple Choice Questions with clear structural options A, B, C, D and an explicit correct answer marker based on this content:\n{content}"
-        return cls._call_gemini(prompt)
+        if last_error is not None:
+            return f"System note: Gemini API error. ({str(last_error)})"
 
-    @classmethod
-    def predict_readiness(cls, performance_data: str) -> str:
-        prompt = f"Given these raw metrics: {performance_data}. Extrapolate an structural readiness score percentage (e.g. 84%) and output a 2-line strategic recommendation matrix."
-        return cls._call_gemini(prompt)
+        return "System note: Unable to generate a response right now. Please try again later."
 
-    @classmethod
-    def daily_motivation(cls, current_streak: int) -> str:
-        prompt = f"Write a powerful, concise motivational quote for a student who has a {current_streak}-day study streak. Keep it under 2 sentences."
-        return cls._call_gemini(prompt)
+    @staticmethod
+    def daily_motivation(streak: int) -> str:
+        prompt = (
+            f"You are a friendly study coach. Write a short, uplifting message for a student "
+            f"who has maintained a {streak}-day study streak and needs encouragement to keep going."
+        )
+        return AIService._generate_response(prompt)
 
-    @classmethod
-    def weekly_report(cls, statistics_string: str) -> str:
-        prompt = f"Synthesize this weekly raw study dataset into an analytical performance summary report:\n{statistics_string}"
-        return cls._call_gemini(prompt)
+    @staticmethod
+    def predict_readiness(raw_metrics: str) -> str:
+        prompt = (
+            "You are an academic readiness evaluator. Based on the following metrics, "
+            "provide a concise readiness score explanation and one suggestion for improvement:\n"
+            f"{raw_metrics}"
+        )
+        return AIService._generate_response(prompt)
+
+    @staticmethod
+    def generate_timetable(subjects: list[str], hours_target: int) -> str:
+        subjects_str = ", ".join(subjects)
+        prompt = (
+            "Create a balanced daily study timetable for a student. Use the following subjects: "
+            f"{subjects_str}. The target daily study time is {hours_target} hours. "
+            "Return the timetable in short bullet points."
+        )
+        return AIService._generate_response(prompt)
+
+    @staticmethod
+    def rearrange_timetable(missed_subject: str, reason: str) -> str:
+        prompt = (
+            "A student missed a study block. Suggest a revised timetable and a short recovery plan. "
+            f"Missed subject: {missed_subject}. Reason: {reason}."
+        )
+        return AIService._generate_response(prompt)
+
+    @staticmethod
+    def summarize_notes(content: str) -> str:
+        prompt = (
+            "Summarize the following study notes into a concise paragraph. "
+            f"Notes:\n{content}"
+        )
+        return AIService._generate_response(prompt)
+
+    @staticmethod
+    def generate_flashcards(content: str) -> str:
+        prompt = (
+            "Read these notes and create 3 short study flashcards in a question-and-answer format. "
+            f"Notes:\n{content}"
+        )
+        return AIService._generate_response(prompt)
+
+    @staticmethod
+    def create_mcqs(content: str) -> str:
+        prompt = (
+            "Generate 3 multiple-choice questions from the notes below. Include one correct answer and "
+            "three answer choices for each question.\n"
+            f"Notes:\n{content}"
+        )
+        return AIService._generate_response(prompt)
+
+    @staticmethod
+    def chat_assistant(user_query: str, context: str) -> str:
+        prompt = (
+            "You are a helpful study assistant. Use the context below to answer the user's question. "
+            f"Context:\n{context}\nQuestion:\n{user_query}"
+        )
+        return AIService._generate_response(prompt)
+
+    @staticmethod
+    def weekly_report(history_text: str) -> str:
+        prompt = (
+            "Generate a brief weekly study performance report based on this study session history:\n"
+            f"{history_text}"
+        )
+        return AIService._generate_response(prompt)
+
+    @staticmethod
+    def suggest_weak_subjects(history_text: str) -> str:
+        prompt = (
+            "Review the study session history below and suggest which subjects may need more focus. "
+            f"History:\n{history_text}"
+        )
+        return AIService._generate_response(prompt)
+
+
+def generate_ai_response(prompt: str) -> str:
+    return AIService._generate_response(prompt)

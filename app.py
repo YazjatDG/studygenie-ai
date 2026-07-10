@@ -2,8 +2,6 @@ import streamlit as str_lt
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, date, timedelta
-import io
-import time
 
 # --- INITIAL APP STATE SETUP ---
 str_lt.set_page_config(page_title="StudyGenie AI", page_icon="🔮", layout="wide")
@@ -44,6 +42,12 @@ if "pomo_time" not in str_lt.session_state:
     str_lt.session_state.pomo_time = 1500
 
 user_profile = db.query(User).first()
+if not user_profile:
+    # Ensure there's always at least one user to avoid attribute errors in the UI
+    default_user = User(username="Student", streak=0, dark_mode=True)
+    db.add(default_user)
+    db.commit()
+    user_profile = db.query(User).first()
 
 # --- NAVIGATION SIDEBAR ---
 str_lt.sidebar.title("🔮 StudyGenie AI")

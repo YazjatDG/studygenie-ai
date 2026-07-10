@@ -1,0 +1,21 @@
+# Sensitive environment files
+api.env
+.env
+
+# SQLite DB
+database/*.db
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Virtualenvs
+venv/
+.env
+api.env
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.db
+.env.local
+venv/
