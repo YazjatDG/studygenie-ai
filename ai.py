@@ -66,23 +66,27 @@ class AIService:
         openai_key = os.environ.get("OPENAI_API_KEY")
         if openai_key and _OPENAI_AVAILABLE:
             try:
-                # Support both new `openai` 1.0+ interface and older interface.
-                os.environ["OPENAI_API_KEY"] = openai_key
                 model = os.environ.get("OPENAI_MODEL", "gpt-3.5-turbo")
 
-                # Newer OpenAI library exposes an `OpenAI` client with `chat.completions.create`
+                # New OpenAI package versions use the OpenAI client.
                 if hasattr(openai, "OpenAI"):
-                    client = openai.OpenAI()
-                    resp = client.chat.completions.create(model=model, messages=[{"role": "user", "content": str(prompt)}], max_tokens=512)
-                    # Try standard path for the response structure
-                    try:
-                        return resp.choices[0].message.content.strip()
-                    except Exception:
-                        # Fallback to other possible shapes
-                        return str(resp)
+                    client = openai.OpenAI(api_key=openai_key)
+                    if hasattr(client, "chat") and hasattr(client.chat, "completions"):
+                        resp = client.chat.completions.create(model=model, messages=[{"role": "user", "content": str(prompt)}], max_tokens=512)
+                        try:
+                            return resp.choices[0].message.content.strip()
+                        except Exception:
+                            return str(resp)
+                    elif hasattr(client, "responses"):
+                        resp = client.responses.create(model=model, input=str(prompt), max_tokens=512)
+                        try:
+                            return resp.output[0].content[0].text.strip()
+                        except Exception:
+                            return str(resp)
 
                 # Older versions used openai.ChatCompletion.create
                 if hasattr(openai, "ChatCompletion"):
+                    openai.api_key = openai_key
                     resp = openai.ChatCompletion.create(model=model, messages=[{"role": "user", "content": str(prompt)}], max_tokens=512)
                     return resp.choices[0].message.content.strip() if resp and getattr(resp, "choices", None) else str(resp)
 
