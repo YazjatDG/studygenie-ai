@@ -2,21 +2,32 @@ import os
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-# Load environment variables. Support both a standard ".env" and the
-# project's "api.env" file that ships alongside this module.
-load_dotenv()
-load_dotenv(os.path.join(os.path.dirname(__file__), "api.env"))
+# Load environment variables from the app folder.
+# Support both a standard local ".env" file and the project's "api.env" file.
+project_dir = os.path.dirname(__file__)
+load_dotenv(os.path.join(project_dir, ".env"))
+load_dotenv(os.path.join(project_dir, "api.env"))
 
 api_key = os.getenv("GEMINI_API_KEY", "").strip()
 
-# Treat the shipped placeholder value as "no key configured".
-if api_key == "your_actual_gemini_api_key_here":
+# Treat common placeholder values as "no key configured".
+placeholder_values = {
+    "",
+    "your_actual_gemini_api_key_here",
+    "your_real_key_here",
+    "your_gemini_api_key_here",
+}
+if api_key.strip().lower() in placeholder_values:
     api_key = ""
 
 if api_key:
     genai.configure(api_key=api_key)
 
 class AIService:
+    @staticmethod
+    def has_api_key() -> bool:
+        return bool(api_key)
+
     @staticmethod
     def _call_gemini(prompt: str) -> str:
         if not api_key:
