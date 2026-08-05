@@ -62,14 +62,26 @@ def compute_metrics_context():
     total_ex = db.query(Exam).count()
     return f"Subjects: {total_subs}, Pending Homeworks: {total_hw}, Total Exams Scheduled: {total_ex}."
 
+
+def show_ai_key_warning():
+    if not AIService.has_api_key():
+        str_lt.warning("⚠️ Gemini API key is missing. Set GEMINI_API_KEY in .env or api.env to enable AI features.")
+        return True
+    return False
+
+AI_KEY_ENABLED = AIService.has_api_key()
+
 # --- PAGES ROUTING MODULES ---
 
 if app_page == "Dashboard":
     str_lt.title("🚀 Executive Command Dashboard")
     
     # Live Interactive motivation banner
-    with str_lt.spinner("Fetching motivation matrix..."):
-        motivational_quote = AIService.daily_motivation(user_profile.streak)
+    if AI_KEY_ENABLED:
+        with str_lt.spinner("Fetching motivation matrix..."):
+            motivational_quote = AIService.daily_motivation(user_profile.streak)
+    else:
+        motivational_quote = "⚠️ Gemini API key missing. Set GEMINI_API_KEY in .env or api.env."
     str_lt.info(f"💡 *{motivational_quote.strip()}*")
     
     # Micro Metrics Grid Layout
@@ -109,12 +121,18 @@ if app_page == "Dashboard":
             str_lt.success("All assignments systematically cleared!")
 
     with right_layout:
+        if show_ai_key_warning():
+            str_lt.info("AI-powered readiness prediction is unavailable until the Gemini API key is configured.")
+
         str_lt.subheader("🔮 Genie Insights Engine")
         if str_lt.button("Predict Exam Readiness Score"):
-            raw_metrics = f"Studied Minutes: {total_minutes}, Unfinished Homework: {pending_hw_count}, Total Subjects: {db.query(Subject).count()}"
-            with str_lt.spinner("Analyzing performance vectors..."):
-                readiness_result = AIService.predict_readiness(raw_metrics)
-            str_lt.success(readiness_result)
+            if not AI_KEY_ENABLED:
+                str_lt.error("AI unavailable until GEMINI_API_KEY is configured.")
+            else:
+                raw_metrics = f"Studied Minutes: {total_minutes}, Unfinished Homework: {pending_hw_count}, Total Subjects: {db.query(Subject).count()}"
+                with str_lt.spinner("Analyzing performance vectors..."):
+                    readiness_result = AIService.predict_readiness(raw_metrics)
+                str_lt.success(readiness_result)
             
         str_lt.subheader("⏱️ Instant Pomodoro Focus")
         p_col1, p_col2 = str_lt.columns(2)
@@ -174,10 +192,15 @@ elif app_page == "Study Planner":
     all_subs_list = [s.name for s in db.query(Subject).all()]
     
     with tab1:
+        if show_ai_key_warning():
+            str_lt.info("AI timetable generation and disruption mitigation depend on the Gemini API key.")
+
         str_lt.subheader("Generate Optimized Engine Recommendations")
         hours_target = str_lt.slider("Target Daily Intensity Allocation (Hours)", 1, 12, 4)
         if str_lt.button("Initialize Generative Timetable System"):
-            if not all_subs_list:
+            if not AI_KEY_ENABLED:
+                str_lt.error("AI unavailable until GEMINI_API_KEY is configured.")
+            elif not all_subs_list:
                 str_lt.error("Configure subjects in inventory module prior to execution.")
             else:
                 with str_lt.spinner("Synthesizing balance patterns..."):
@@ -189,7 +212,9 @@ elif app_page == "Study Planner":
         missed_sub = str_lt.selectbox("Select Block Target Missed", ["None"] + all_subs_list)
         missed_reason = str_lt.text_input("Operational failure reason (e.g., Illness, Fatigue)")
         if str_lt.button("Recalibrate Study Path Plan"):
-            if missed_sub != "None" and missed_reason:
+            if not AI_KEY_ENABLED:
+                str_lt.error("AI unavailable until GEMINI_API_KEY is configured.")
+            elif missed_sub != "None" and missed_reason:
                 with str_lt.spinner("Generating recovery routes..."):
                     rearrange_res = AIService.rearrange_timetable(missed_sub, missed_reason)
                 str_lt.info(rearrange_res)
@@ -314,12 +339,17 @@ elif app_page == "Exams":
 elif app_page == "Notes":
     str_lt.title("📂 Generative Learning Materials Matrix")
     
+    if show_ai_key_warning():
+        str_lt.info("AI summaries, flashcards, and MCQs are disabled until GEMINI_API_KEY is configured.")
+
     str_lt.subheader("Synthesize Text Knowledge Base Nodes")
     n_title = str_lt.text_input("Intellectual Property Node Label (Title)")
     n_content = str_lt.text_area("Raw Text Structural Payload Content")
     
     if str_lt.button("Anchor Payload Node and Initialize Analysis Engine"):
-        if n_title.strip() and n_content.strip():
+        if not AI_KEY_ENABLED:
+            str_lt.error("AI unavailable until GEMINI_API_KEY is configured.")
+        elif n_title.strip() and n_content.strip():
             with str_lt.spinner("Running core semantic pipeline metrics components..."):
                 sum_text = AIService.summarize_notes(n_content)
                 flash_text = AIService.generate_flashcards(n_content)
@@ -357,6 +387,8 @@ elif app_page == "Notes":
 elif app_page == "AI Study Assistant":
     str_lt.title("💬 StudyGenie AI Cognitive Engine Hub")
     str_lt.caption("Consult your structural academic engineering strategist for live solutions.")
+    if show_ai_key_warning():
+        str_lt.info("Chat-based AI assistance requires GEMINI_API_KEY to be set.")
     
     if "chat_history" not in str_lt.session_state:
         str_lt.session_state.chat_history = []
@@ -373,14 +405,21 @@ elif app_page == "AI Study Assistant":
         
         ctx_anchor = compute_metrics_context()
         with str_lt.chat_message("assistant"):
-            with str_lt.spinner("Computing structural response paths..."):
-                engine_reply = AIService.chat_assistant(user_query, ctx_anchor)
-            str_lt.markdown(engine_reply)
-        str_lt.session_state.chat_history.append({"role": "assistant", "text": engine_reply})
+            if not AI_KEY_ENABLED:
+                str_lt.markdown("⚠️ Gemini API key missing. Set GEMINI_API_KEY in .env or api.env to enable AI.")
+                engine_reply = None
+            else:
+                with str_lt.spinner("Computing structural response paths..."):
+                    engine_reply = AIService.chat_assistant(user_query, ctx_anchor)
+                str_lt.markdown(engine_reply)
+        if engine_reply is not None:
+            str_lt.session_state.chat_history.append({"role": "assistant", "text": engine_reply})
 
 
 elif app_page == "Analytics":
     str_lt.title("📊 Analytical System Insight Graphs")
+    if show_ai_key_warning():
+        str_lt.info("AI diagnostic reports require GEMINI_API_KEY to be configured.")
     
     # Load session log history sets
     sessions_data = db.query(StudySession).all()
@@ -417,13 +456,16 @@ elif app_page == "Analytics":
         str_lt.markdown("---")
         str_lt.subheader("AI Performance Diagnostics Matrix Report")
         if str_lt.button("Synthesize Executive Analytics Assessment Data Summary"):
-            history_string = df_sessions.to_string()
-            with str_lt.spinner("Processing optimization parameters..."):
-                report_out = AIService.weekly_report(history_string)
-                weak_out = AIService.suggest_weak_subjects(history_string)
-            str_lt.success("System-Wide Analytical Report Generation Finalized.")
-            str_lt.markdown(report_out)
-            str_lt.warning(weak_out)
+            if not AI_KEY_ENABLED:
+                str_lt.error("AI unavailable until GEMINI_API_KEY is configured.")
+            else:
+                history_string = df_sessions.to_string()
+                with str_lt.spinner("Processing optimization parameters..."):
+                    report_out = AIService.weekly_report(history_string)
+                    weak_out = AIService.suggest_weak_subjects(history_string)
+                str_lt.success("System-Wide Analytical Report Generation Finalized.")
+                str_lt.markdown(report_out)
+                str_lt.warning(weak_out)
 
 
 elif app_page == "Goals":
